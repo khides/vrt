@@ -1,35 +1,11 @@
 {
-  "figmaFileId": "YOUR_FIGMA_FILE_ID",
+  "figmaFileId": "cWiDCn3brmySFIcidCmP3E",
   "mappings": [
     {
-      "figmaNodeId": "123:456",
+      "figmaNodeId": "1:1719",
       "storyId": "layout-hero--snapshot-light",
-      "viewport": { "width": 1440, "height": 900 },
-      "description": "Hero Section Light Desktop"
-    },
-    {
-      "figmaNodeId": "123:789",
-      "storyId": "layout-hero--snapshot-light",
-      "viewport": { "width": 375, "height": 667 },
-      "description": "Hero Section Light Mobile"
-    },
-    {
-      "figmaNodeId": "124:100",
-      "storyId": "layout-hero--snapshot-dark",
-      "viewport": { "width": 1440, "height": 900 },
-      "description": "Hero Section Dark Desktop"
-    },
-    {
-      "figmaNodeId": "125:100",
-      "storyId": "layout-navigation--snapshot",
-      "viewport": { "width": 1440, "height": 80 },
-      "description": "Navigation Desktop"
-    },
-    {
-      "figmaNodeId": "126:100",
-      "storyId": "ui-button--snapshot",
-      "viewport": { "width": 800, "height": 400 },
-      "description": "Button Variants"
+      "viewport": { "width": 1920, "height": 1080 },
+      "description": "Apple.com Light Page (1920w)"
     }
   ]
 }

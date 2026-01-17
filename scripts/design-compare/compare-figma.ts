@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { chromium } from 'playwright';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
