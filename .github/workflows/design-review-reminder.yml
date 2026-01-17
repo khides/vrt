@@ -1,0 +1,65 @@
+name: Design Review Reminder
+
+on:
+  pull_request:
+    paths:
+      - 'src/components/**'
+      - 'src/design-tokens/**'
+      - '**/*.css'
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `## 🎨 Design Verification Reminder
+
+            This PR contains UI changes. Please verify against the Figma design:
+
+            ### Checklist
+            - [ ] Colors match design tokens
+            - [ ] Typography follows design specs
+            - [ ] Spacing/layout matches Figma
+            - [ ] Responsive behavior tested (mobile/tablet/desktop)
+            - [ ] Storybook story created/updated
+            - [ ] VRT baseline captured/verified
+
+            ### Commands
+            \`\`\`bash
+            # Run VRT tests
+            pnpm test:vrt
+
+            # Update VRT baselines (if intentional changes)
+            pnpm test:vrt:update
+
+            # Run Figma comparison (if configured)
+            pnpm design:compare
+            \`\`\`
+
+            ---
+            *This is an automated reminder. Please check the Playwright VRT status for visual changes.*
+            `;
+
+            // Check if comment already exists
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existingComment = comments.find(c =>
+              c.body.includes('Design Verification Reminder')
+            );
+
+            if (!existingComment) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }

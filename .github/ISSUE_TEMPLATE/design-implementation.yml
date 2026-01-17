@@ -1,0 +1,76 @@
+name: デザイン実装
+description: Figmaデザインを実装するタスク
+labels: ["design", "frontend"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## デザイン実装タスク
+        Figmaデザインを実装するためのIssueテンプレートです。
+
+  - type: input
+    id: figma-url
+    attributes:
+      label: Figma URL
+      description: 実装対象のFigmaフレームURL
+      placeholder: "https://www.figma.com/file/..."
+    validations:
+      required: true
+
+  - type: input
+    id: figma-node-id
+    attributes:
+      label: Figma Node ID
+      description: VRT比較用のNode ID（URLの?node-id=以降の部分）
+      placeholder: "123:456"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: component-type
+    attributes:
+      label: コンポーネントタイプ
+      options:
+        - UI Component (Button, Input, etc.)
+        - Layout Component (Hero, Navigation, etc.)
+        - Section (Product Showcase, etc.)
+        - Page
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 実装内容
+      description: 実装する内容の詳細
+      placeholder: |
+        - 新しいHeroセクションを実装
+        - レスポンシブ対応（mobile/tablet/desktop）
+        - Framer Motionでアニメーション追加
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 実装チェックリスト
+      description: 実装完了時に確認する項目
+      options:
+        - label: カラーがデザイントークンと一致
+        - label: タイポグラフィがFigma仕様と一致
+        - label: スペーシング・レイアウトが一致
+        - label: レスポンシブ動作を確認（mobile/tablet/desktop）
+        - label: アクセシビリティ（WCAG AA）確認
+        - label: Storybook storyを作成
+        - label: VRTベースラインを更新（pnpm test:vrt:update）
+        - label: Figmaマッピングを更新（必要な場合）
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 備考
+      description: その他の注意事項
+      placeholder: |
+        - 既存のButtonコンポーネントを拡張
+        - アニメーションはFigmaプロトタイプを参照
