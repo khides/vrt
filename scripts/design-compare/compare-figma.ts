@@ -14,6 +14,7 @@ interface Mapping {
   storyId: string;
   viewport: { width: number; height: number };
   description: string;
+  threshold?: number; // Custom threshold per mapping (default: 15)
 }
 
 interface CompareConfig {
@@ -26,6 +27,8 @@ interface CompareResult {
   storyId: string;
   description: string;
   diffPercentage: number;
+  threshold: number;
+  passed: boolean;
   figmaImage?: string;
   storyImage?: string;
   diffImage?: string;
@@ -35,16 +38,48 @@ interface CompareResult {
 const REPORTS_DIR = path.join(process.cwd(), 'reports', 'figma-diff');
 const STORYBOOK_URL = process.env.STORYBOOK_URL || 'http://localhost:6007';
 
-async function fetchFigmaImage(fileId: string, nodeId: string): Promise<Buffer | null> {
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  retries = 3,
+  delay = 2000
+): Promise<Response> {
+  for (let i = 0; i < retries; i++) {
+    const response = await fetch(url, options);
+    if (response.status === 429) {
+      console.log(`     ⏳ Rate limited, waiting ${delay / 1000}s before retry ${i + 1}/${retries}...`);
+      await sleep(delay);
+      delay *= 2; // Exponential backoff
+      continue;
+    }
+    return response;
+  }
+  throw new Error('Max retries exceeded for rate limiting');
+}
+
+// Batch fetch all Figma images in a single API call
+async function fetchAllFigmaImages(
+  fileId: string,
+  nodeIds: string[]
+): Promise<Map<string, Buffer | null>> {
   const token = process.env.FIGMA_ACCESS_TOKEN;
+  const results = new Map<string, Buffer | null>();
+
   if (!token) {
     console.warn('⚠️  FIGMA_ACCESS_TOKEN not set. Skipping Figma image fetch.');
-    return null;
+    nodeIds.forEach(id => results.set(id, null));
+    return results;
   }
 
   try {
-    const response = await fetch(
-      `https://api.figma.com/v1/images/${fileId}?ids=${encodeURIComponent(nodeId)}&format=png&scale=2`,
+    // Batch all node IDs into a single API request
+    const idsParam = nodeIds.map(id => encodeURIComponent(id)).join(',');
+    const response = await fetchWithRetry(
+      `https://api.figma.com/v1/images/${fileId}?ids=${idsParam}&format=png&scale=2`,
       { headers: { 'X-Figma-Token': token } }
     );
 
@@ -53,18 +88,45 @@ async function fetchFigmaImage(fileId: string, nodeId: string): Promise<Buffer |
     }
 
     const data = await response.json();
-    const imageUrl = data.images?.[nodeId];
 
-    if (!imageUrl) {
-      throw new Error(`No image URL returned for node ${nodeId}`);
+    // Fetch each image URL
+    for (const nodeId of nodeIds) {
+      const imageUrl = data.images?.[nodeId];
+      if (!imageUrl) {
+        console.warn(`     ⚠️ No image URL for node ${nodeId}`);
+        results.set(nodeId, null);
+        continue;
+      }
+
+      try {
+        const imageResponse = await fetch(imageUrl);
+        results.set(nodeId, Buffer.from(await imageResponse.arrayBuffer()));
+      } catch (err) {
+        console.error(`     Failed to download image for ${nodeId}:`, err);
+        results.set(nodeId, null);
+      }
     }
-
-    const imageResponse = await fetch(imageUrl);
-    return Buffer.from(await imageResponse.arrayBuffer());
   } catch (error) {
-    console.error(`Failed to fetch Figma image for ${nodeId}:`, error);
-    return null;
+    console.error('Failed to fetch Figma images:', error);
+    nodeIds.forEach(id => results.set(id, null));
   }
+
+  return results;
+}
+
+function cropPNG(png: PNG, targetWidth: number, targetHeight: number): PNG {
+  const cropped = new PNG({ width: targetWidth, height: targetHeight });
+  for (let y = 0; y < targetHeight; y++) {
+    for (let x = 0; x < targetWidth; x++) {
+      const srcIdx = (png.width * y + x) << 2;
+      const dstIdx = (targetWidth * y + x) << 2;
+      cropped.data[dstIdx] = png.data[srcIdx];
+      cropped.data[dstIdx + 1] = png.data[srcIdx + 1];
+      cropped.data[dstIdx + 2] = png.data[srcIdx + 2];
+      cropped.data[dstIdx + 3] = png.data[srcIdx + 3];
+    }
+  }
+  return cropped;
 }
 
 function calculateDiff(
@@ -74,15 +136,18 @@ function calculateDiff(
   const img1 = PNG.sync.read(img1Buffer);
   const img2 = PNG.sync.read(img2Buffer);
 
-  // Resize images to match if needed
+  // Crop images to match the smaller dimensions
   const width = Math.min(img1.width, img2.width);
   const height = Math.min(img1.height, img2.height);
+
+  const img1Cropped = img1.width === width && img1.height === height ? img1 : cropPNG(img1, width, height);
+  const img2Cropped = img2.width === width && img2.height === height ? img2 : cropPNG(img2, width, height);
 
   const diff = new PNG({ width, height });
 
   const numDiffPixels = pixelmatch(
-    img1.data,
-    img2.data,
+    img1Cropped.data,
+    img2Cropped.data,
     diff.data,
     width,
     height,
@@ -117,15 +182,15 @@ async function captureStoryScreenshot(
 }
 
 function generateHtmlReport(results: CompareResult[]): string {
-  const getDiffClass = (percentage: number): string => {
-    if (percentage >= 15) return 'diff-high';
-    if (percentage >= 5) return 'diff-medium';
+  const getDiffClass = (result: CompareResult): string => {
+    if (!result.passed) return 'diff-high';
+    if (result.diffPercentage >= result.threshold * 0.7) return 'diff-medium';
     return 'diff-low';
   };
 
-  const getStatusEmoji = (percentage: number): string => {
-    if (percentage >= 15) return '❌';
-    if (percentage >= 5) return '⚠️';
+  const getStatusEmoji = (result: CompareResult): string => {
+    if (!result.passed) return '❌';
+    if (result.diffPercentage >= result.threshold * 0.7) return '⚠️';
     return '✅';
   };
 
@@ -213,24 +278,20 @@ function generateHtmlReport(results: CompareResult[]): string {
       <div class="value">${results.length}</div>
     </div>
     <div class="summary-card">
-      <h3>Passed (< 5%)</h3>
-      <div class="value" style="color: #059669">${results.filter(r => r.diffPercentage < 5).length}</div>
+      <h3>Passed</h3>
+      <div class="value" style="color: #059669">${results.filter(r => r.passed).length}</div>
     </div>
     <div class="summary-card">
-      <h3>Warning (5-15%)</h3>
-      <div class="value" style="color: #d97706">${results.filter(r => r.diffPercentage >= 5 && r.diffPercentage < 15).length}</div>
-    </div>
-    <div class="summary-card">
-      <h3>Failed (≥ 15%)</h3>
-      <div class="value" style="color: #dc2626">${results.filter(r => r.diffPercentage >= 15).length}</div>
+      <h3>Failed</h3>
+      <div class="value" style="color: #dc2626">${results.filter(r => !r.passed).length}</div>
     </div>
   </div>
 
   ${results.map(r => `
     <section class="comparison">
       <div class="comparison-header">
-        <span class="comparison-title">${getStatusEmoji(r.diffPercentage)} ${r.description}</span>
-        <span class="comparison-diff ${getDiffClass(r.diffPercentage)}">${r.diffPercentage.toFixed(2)}% diff</span>
+        <span class="comparison-title">${getStatusEmoji(r)} ${r.description}</span>
+        <span class="comparison-diff ${getDiffClass(r)}">${r.diffPercentage.toFixed(2)}% (threshold: ${r.threshold}%)</span>
       </div>
       ${r.error ? `<p class="error">${r.error}</p>` : ''}
       ${!r.figmaImage ? '<p class="no-figma">Figma image not available (FIGMA_ACCESS_TOKEN not set)</p>' : ''}
@@ -283,6 +344,12 @@ async function main() {
   // Ensure reports directory exists
   fs.mkdirSync(REPORTS_DIR, { recursive: true });
 
+  // Batch fetch all Figma images first (single API call)
+  console.log('  📥 Fetching Figma images...');
+  const nodeIds = mappings.map(m => m.figmaNodeId);
+  const figmaImages = await fetchAllFigmaImages(config.figmaFileId, nodeIds);
+  console.log('  ✓ Figma images fetched\n');
+
   const results: CompareResult[] = [];
 
   for (const mapping of mappings) {
@@ -292,37 +359,53 @@ async function main() {
       // Capture Storybook screenshot
       const storyImage = await captureStoryScreenshot(mapping.storyId, mapping.viewport);
 
-      // Fetch Figma image
-      const figmaImage = await fetchFigmaImage(config.figmaFileId, mapping.figmaNodeId);
+      // Get pre-fetched Figma image
+      const figmaImage = figmaImages.get(mapping.figmaNodeId) ?? null;
+
+      const threshold = mapping.threshold ?? 15;
 
       if (figmaImage) {
         // Calculate diff
         const { percentage, diffBuffer } = calculateDiff(figmaImage, storyImage);
+        const passed = percentage < threshold;
 
         results.push({
-          ...mapping,
+          figmaNodeId: mapping.figmaNodeId,
+          storyId: mapping.storyId,
+          description: mapping.description,
           diffPercentage: percentage,
+          threshold,
+          passed,
           figmaImage: figmaImage.toString('base64'),
           storyImage: storyImage.toString('base64'),
           diffImage: diffBuffer.toString('base64'),
         });
 
-        const status = percentage < 5 ? '✅' : percentage < 15 ? '⚠️' : '❌';
-        console.log(`     ${status} ${percentage.toFixed(2)}% diff`);
+        const status = passed ? '✅' : percentage < 15 ? '⚠️' : '❌';
+        console.log(`     ${status} ${percentage.toFixed(2)}% diff (threshold: ${threshold}%)`);
       } else {
         // No Figma image, just record the story screenshot
         results.push({
-          ...mapping,
+          figmaNodeId: mapping.figmaNodeId,
+          storyId: mapping.storyId,
+          description: mapping.description,
           diffPercentage: 0,
+          threshold,
+          passed: true,
           storyImage: storyImage.toString('base64'),
         });
         console.log('     ⚪ Figma image not available');
       }
     } catch (error) {
       console.error(`     ❌ Error: ${error}`);
+      const threshold = mapping.threshold ?? 15;
       results.push({
-        ...mapping,
+        figmaNodeId: mapping.figmaNodeId,
+        storyId: mapping.storyId,
+        description: mapping.description,
         diffPercentage: 100,
+        threshold,
+        passed: false,
         error: String(error),
       });
     }
@@ -336,18 +419,19 @@ async function main() {
   console.log(`\n📊 Report generated: ${path.join(REPORTS_DIR, 'report.html')}`);
 
   // Summary
-  const passed = results.filter(r => r.diffPercentage < 5).length;
-  const warnings = results.filter(r => r.diffPercentage >= 5 && r.diffPercentage < 15).length;
-  const failed = results.filter(r => r.diffPercentage >= 15).length;
+  const passedCount = results.filter(r => r.passed).length;
+  const failedCount = results.filter(r => !r.passed).length;
 
   console.log(`\n📈 Summary:`);
-  console.log(`   ✅ Passed: ${passed}`);
-  console.log(`   ⚠️  Warnings: ${warnings}`);
-  console.log(`   ❌ Failed: ${failed}`);
+  console.log(`   ✅ Passed: ${passedCount}`);
+  console.log(`   ❌ Failed: ${failedCount}`);
 
   // Exit with error if any failed
-  if (failed > 0) {
-    console.log('\n❌ Some components have significant visual differences from Figma.');
+  if (failedCount > 0) {
+    console.log('\n❌ Some components exceed their diff threshold.');
+    results.filter(r => !r.passed).forEach(r => {
+      console.log(`   - ${r.description}: ${r.diffPercentage.toFixed(2)}% (threshold: ${r.threshold}%)`);
+    });
     process.exit(1);
   }
 }

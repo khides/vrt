@@ -2,10 +2,32 @@
   "figmaFileId": "cWiDCn3brmySFIcidCmP3E",
   "mappings": [
     {
-      "figmaNodeId": "1:1719",
+      "figmaNodeId": "1:591",
       "storyId": "layout-hero--snapshot-light",
       "viewport": { "width": 1920, "height": 1080 },
-      "description": "Apple.com Light Page (1920w)"
+      "description": "[Page] Apple.com Full Page (1920w)",
+      "threshold": 15
+    },
+    {
+      "figmaNodeId": "1:425",
+      "storyId": "layout-hero--snapshot-light",
+      "viewport": { "width": 450, "height": 332 },
+      "description": "[Component] Hero Light",
+      "threshold": 5
+    },
+    {
+      "figmaNodeId": "1:440",
+      "storyId": "layout-navigation--snapshot",
+      "viewport": { "width": 300, "height": 100 },
+      "description": "[Component] Navigation",
+      "threshold": 5
+    },
+    {
+      "figmaNodeId": "1:484",
+      "storyId": "ui-button--snapshot",
+      "viewport": { "width": 330, "height": 108 },
+      "description": "[Component] Buttons",
+      "threshold": 5
     }
   ]
 }
